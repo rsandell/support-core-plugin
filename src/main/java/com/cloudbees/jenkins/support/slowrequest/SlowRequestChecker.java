@@ -26,10 +26,11 @@ import java.util.concurrent.TimeUnit;
 public class SlowRequestChecker extends PeriodicWork {
     /**
      * How often to run the slow request checker
+     *
      * @since 2.12
      */
     public static final int RECURRENCE_PERIOD_SEC =
-            Integer.getInteger(SlowRequestChecker.class.getName()+".RECURRENCE_PERIOD_SEC", 3);
+            Integer.getInteger(SlowRequestChecker.class.getName() + ".RECURRENCE_PERIOD_SEC", 3);
 
     /**
      * Time in milliseconds that's considered too slow for requests.
@@ -37,7 +38,14 @@ public class SlowRequestChecker extends PeriodicWork {
      * If this value is less than twice {@link #RECURRENCE_PERIOD_SEC} then that will be used instead.
      */
     public static final int THRESHOLD =
-            Integer.getInteger(SlowRequestChecker.class.getName()+".THRESHOLD_MS", 10000);
+            Integer.getInteger(SlowRequestChecker.class.getName() + ".THRESHOLD_MS", 10000);
+
+    /**
+     * If there is a slow request, rather than repeatedly capturing the thread dump every {@link #RECURRENCE_PERIOD_SEC}
+     * Capture thread dumps of the slow request at a slower cadence.
+     */
+    public static final long REPEAT_THREAD_DUMP_AFTER_MS =
+            Long.getLong(SlowRequestChecker.class.getName() + ".REPEAT_THREAD_DUMP_AFTER_MS", 15000);
 
     /**
      * Provide a means to disable the slow request checker. This is a volatile non-final field as if you run into
@@ -45,7 +53,7 @@ public class SlowRequestChecker extends PeriodicWork {
      *
      * @since 2.12
      */
-    public static volatile boolean DISABLED = Boolean.getBoolean(SlowRequestChecker.class.getName()+".DISABLED");
+    public static volatile boolean DISABLED = Boolean.getBoolean(SlowRequestChecker.class.getName() + ".DISABLED");
 
     @Inject
     SlowRequestFilter filter;
@@ -53,7 +61,7 @@ public class SlowRequestChecker extends PeriodicWork {
     @Inject
     Jenkins jenkins;
 
-    final FileListCap logs = new FileListCap(new File(Jenkins.getInstance().getRootDir(),"slow-requests"), 50);
+    final FileListCap logs = new FileListCap(new File(Jenkins.getInstance().getRootDir(), "slow-requests"), 50);
 
     final SimpleDateFormat format = new SimpleDateFormat("yyyyMMdd-HHmmss.SSS");
 
@@ -68,6 +76,7 @@ public class SlowRequestChecker extends PeriodicWork {
             return;
         }
         ThreadInfo[] threads = null;
+        long threadsTimestamp = 0;
 
         final long now = System.currentTimeMillis();
 
@@ -81,23 +90,31 @@ public class SlowRequestChecker extends PeriodicWork {
         for (InflightRequest req : filter.tracker.values()) {
             long totalTime = now - req.startTime;
 
-            if (totalTime> thresholdMillis) {
-                if (threads==null)
+            if (totalTime > thresholdMillis) {
+                if (req.lastThreadDump + REPEAT_THREAD_DUMP_AFTER_MS > System.currentTimeMillis()) {
+                    continue;
+                }
+                if (threads == null) {
                     threads = Functions.getThreadInfos();
+                    threadsTimestamp = System.currentTimeMillis();
+                }
+                req.lastThreadDump = threadsTimestamp;
 
                 // if the thread has exited while we are taking the thread dump, ignore this.
-                if (req.ended)    continue;
+                if (req.ended) {
+                    continue;
+                }
 
                 PrintWriter w = null;
                 try {
-                    if (req.record==null) {
+                    if (req.record == null) {
                         req.record = logs.file(format.format(new Date(iota++)) + ".txt");
                         logs.add(req.record);
 
-                        w = new PrintWriter(req.record,"UTF-8");
+                        w = new PrintWriter(req.record, "UTF-8");
                         req.writeHeader(w);
                     } else {
-                        w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(req.record,true),"UTF-8"));
+                        w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(req.record, true), "UTF-8"));
                         logs.touch(req.record);
                     }
 
@@ -105,7 +122,7 @@ public class SlowRequestChecker extends PeriodicWork {
                         if (req.is(thread)) {
                             w.println("TimeElapsed: " + totalTime + "ms");
                             for (StackTraceElement st : thread.getStackTrace()) {
-                                w.println("    "+st);
+                                w.println("    " + st);
                             }
                             continue OUTER;
                         }

@@ -37,6 +37,11 @@ final class InflightRequest {
      */
     File record;
 
+    /**
+     * The last time we did a thread dump of this request.
+     */
+    volatile long lastThreadDump;
+
 
     InflightRequest(HttpServletRequest req) {
         url = req.getRequestURL().toString();
